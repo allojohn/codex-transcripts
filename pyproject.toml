@@ -1,5 +1,5 @@
 [project]
-name = "codex-transcripts"
+name = "codex-conversion"
 version = "0.1.0"
 description = "Convert Codex Desktop session files to HTML transcripts"
 readme = "README.md"
@@ -13,11 +13,14 @@ dependencies = [
 ]
 
 [project.scripts]
-codex-transcripts = "codex_transcripts:main"
+codex-conversion = "codex_transcripts:main"
 
 [build-system]
 requires = ["uv_build>=0.9.7,<0.10.0"]
 build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "codex_transcripts"
 
 [dependency-groups]
 dev = [

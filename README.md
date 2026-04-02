@@ -1,4 +1,4 @@
-# codex-transcripts
+# codex-conversion
 
 把 Codex Desktop 的本地 `.jsonl` 会话记录，以及导出的 `.json` / `.jsonl` session 文件，转换成适合浏览的 HTML 聊天记录页面，整体交互和结构参考 `claude-code-transcripts-main`，但解析逻辑适配 Codex 客户端真实 session 格式。
 
@@ -8,16 +8,17 @@
 
 ```bash
 git clone git@github.com:allojohn/codex-transcripts.git
+cd codex-transcripts
 uv tool install .
 ```
 
 安装完成后可以运行：
 
 ```bash
-codex-transcripts --help
+codex-conversion --help
 ```
 
-如果 `codex-transcripts` 找不到，通常是因为 `~/.local/bin` 还没加到 `PATH`。可以执行：
+如果 `codex-conversion` 找不到，通常是因为 `~/.local/bin` 还没加到 `PATH`。可以执行：
 
 ```bash
 uv tool update-shell
@@ -32,7 +33,7 @@ uv sync
 然后用开发模式运行：
 
 ```bash
-uv run codex-transcripts --help
+uv run codex-conversion --help
 ```
 
 ## 用法
@@ -40,35 +41,35 @@ uv run codex-transcripts --help
 直接从本地最近会话里挑选：
 
 ```bash
-uv run codex-transcripts
-uv run codex-transcripts local
+uv run codex-conversion
+uv run codex-conversion local
 ```
 
 转换指定会话文件：
 
 ```bash
-uv run codex-transcripts json ~/.codex/sessions/2026/03/31/rollout-xxxx.jsonl -o ./output
-uv run codex-transcripts json ~/.codex/sessions/2026/03/31/rollout-xxxx.jsonl --open
+uv run codex-conversion json ~/.codex/sessions/2026/03/31/rollout-xxxx.jsonl -o ./output
+uv run codex-conversion json ~/.codex/sessions/2026/03/31/rollout-xxxx.jsonl --open
 ```
 
 也支持从 URL 直接拉取 JSON/JSONL：
 
 ```bash
-uv run codex-transcripts json https://example.com/session.jsonl -o ./output
+uv run codex-conversion json https://example.com/session.jsonl -o ./output
 ```
 
 上传到 GitHub Gist 并拿到预览链接：
 
 ```bash
-uv run codex-transcripts json ~/.codex/sessions/2026/03/31/rollout-xxxx.jsonl --gist
-uv run codex-transcripts --gist
+uv run codex-conversion json ~/.codex/sessions/2026/03/31/rollout-xxxx.jsonl --gist
+uv run codex-conversion --gist
 ```
 
 批量生成归档：
 
 ```bash
-uv run codex-transcripts all -o ./codex-archive
-uv run codex-transcripts all --dry-run
+uv run codex-conversion all -o ./codex-archive
+uv run codex-conversion all --dry-run
 ```
 
 如果没有传 `-o/--output`，`local` 和 `json` 会默认写到临时目录；当没有传 `-o`、没有启用 `--gist`、也没有启用 `-a/--output-auto` 时，会自动打开结果页。
@@ -133,11 +134,11 @@ Codex 没有对应 Claude 项目里的 `web` 会话 API 导入能力，所以这
 
 可以直接把下面这段话复制给 agent：
 
-> Read `/Users/allojohn/www.allojohn.com/code.allojohn.com/codex-transcripts/README.md` to learn how `codex-transcripts` works. Then ask me which Codex session I want to convert, whether I want local HTML, gist HTML, archive output, or just the source JSONL copied out, and run the right command for me.
+> Read `/Users/allojohn/www.allojohn.com/code.allojohn.com/codex-transcripts/README.md` to learn how `codex-conversion` works. Then ask me which Codex session I want to convert, whether I want local HTML, gist HTML, archive output, or just the source JSONL copied out, and run the right command for me.
 
 如果你想让 agent 更主动一点，也可以用这个版本：
 
-> Read `/Users/allojohn/www.allojohn.com/code.allojohn.com/codex-transcripts/README.md` and use it to operate `codex-transcripts` for me. First ask me which session I want to export and whether I want `index.html` plus paged transcript files locally, a GitHub Gist preview link, a full archive, or the original session JSONL copied into the output directory. Then run the correct command and tell me where the result was generated.
+> Read `/Users/allojohn/www.allojohn.com/code.allojohn.com/codex-transcripts/README.md` and use it to operate `codex-conversion` for me. First ask me which session I want to export and whether I want `index.html` plus paged transcript files locally, a GitHub Gist preview link, a full archive, or the original session JSONL copied into the output directory. Then run the correct command and tell me where the result was generated.
 
 ## 已知限制
 
