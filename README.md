@@ -1,14 +1,35 @@
 # codex-transcripts
 
-把 Codex Desktop 的本地 `.jsonl` 会话记录转换成适合浏览的 HTML 聊天记录页面，整体交互和结构参考 `claude-code-transcripts-main`，但解析逻辑适配 Codex 客户端真实 session 格式。
+把 Codex Desktop 的本地 `.jsonl` 会话记录，以及导出的 `.json` / `.jsonl` session 文件，转换成适合浏览的 HTML 聊天记录页面，整体交互和结构参考 `claude-code-transcripts-main`，但解析逻辑适配 Codex 客户端真实 session 格式。
 
 ## 安装
+
+如果你只是想直接安装这个命令行工具，推荐：
+
+```bash
+git clone git@github.com:allojohn/codex-transcripts.git
+uv tool install .
+```
+
+安装完成后可以运行：
+
+```bash
+codex-transcripts --help
+```
+
+如果 `codex-transcripts` 找不到，通常是因为 `~/.local/bin` 还没加到 `PATH`。可以执行：
+
+```bash
+uv tool update-shell
+```
+
+如果你是在本仓库里做开发，再使用：
 
 ```bash
 uv sync
 ```
 
-也可以直接查看帮助：
+然后用开发模式运行：
 
 ```bash
 uv run codex-transcripts --help
@@ -50,6 +71,8 @@ uv run codex-transcripts all -o ./codex-archive
 uv run codex-transcripts all --dry-run
 ```
 
+如果没有传 `-o/--output`，`local` 和 `json` 会默认写到临时目录；当没有传 `-o`、没有启用 `--gist`、也没有启用 `-a/--output-auto` 时，会自动打开结果页。
+
 ## 命令
 
 - `local` / 默认命令：从 `~/.codex/sessions` 读取最近本地会话
@@ -64,9 +87,16 @@ Codex 没有对应 Claude 项目里的 `web` 会话 API 导入能力，所以这
 
 - `-o, --output DIRECTORY`：输出目录；默认写到临时目录
 - `-a, --output-auto`：自动按 session 文件名创建子目录
+- `--source PATH`：仅 `local` 支持，自定义本地会话目录
+- `--limit INTEGER`：仅 `local` 支持，控制交互列表里展示多少个最近会话
 - `--open`：生成后打开 `index.html`
 - `--gist`：上传 HTML 到 GitHub Gist 并输出 `gisthost.github.io` 预览链接
 - `--json`：把原始 session 文件一起复制到输出目录
+
+生成结果的页面结构是：
+
+- `index.html`：索引页，只展示每个 turn 的 user 摘要
+- `page-001.html`、`page-002.html` ...：完整消息分页，包含 assistant、tool call、tool result、commentary 等完整内容
 
 ## 批量归档
 
@@ -75,6 +105,8 @@ Codex 没有对应 Claude 项目里的 `web` 会话 API 导入能力，所以这
 - 总索引页：列出所有 workspace
 - 每个 workspace 的索引页：列出该 workspace 下的 sessions
 - 每个 session 的 transcript 页面
+
+默认会排除 agent / subagent sessions；只有加上 `--include-agents` 才会把这些会话也纳入归档。
 
 `all` 支持这些选项：
 
@@ -97,9 +129,19 @@ Codex 没有对应 Claude 项目里的 `web` 会话 API 导入能力，所以这
 - 多页转写：按 Codex turn 分页
 - Gist 预览修复：自动注入相对链接修复脚本，保证分页和锚点在 `gisthost.github.io` 下可用
 
+## 给 Agent 的一句话说明
+
+可以直接把下面这段话复制给 agent：
+
+> Read `/Users/allojohn/www.allojohn.com/code.allojohn.com/codex-transcripts/README.md` to learn how `codex-transcripts` works. Then ask me which Codex session I want to convert, whether I want local HTML, gist HTML, archive output, or just the source JSONL copied out, and run the right command for me.
+
+如果你想让 agent 更主动一点，也可以用这个版本：
+
+> Read `/Users/allojohn/www.allojohn.com/code.allojohn.com/codex-transcripts/README.md` and use it to operate `codex-transcripts` for me. First ask me which session I want to export and whether I want `index.html` plus paged transcript files locally, a GitHub Gist preview link, a full archive, or the original session JSONL copied into the output directory. Then run the correct command and tell me where the result was generated.
+
 ## 已知限制
 
-- 目前只处理 Codex 本地 `.jsonl` 会话，不读 SQLite 历史库
+- `local` / `all` 目前只扫描 Codex 本地 `.jsonl` 会话目录，不读 SQLite 历史库
 - `reasoning.encrypted_content` 不会解密，只会显示可见 summary
 - 一些 `event_msg` 是 `response_item` 的重复镜像，页面里会去重并优先展示最终可读消息
 - `--gist` 依赖 `gh` 已安装且完成 `gh auth login`

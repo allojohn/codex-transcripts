@@ -1,0 +1,11 @@
+{"timestamp":"2026-03-27T08:37:16.896Z","type":"session_meta","payload":{"id":"real-excerpt-1","timestamp":"2026-03-27T08:37:02.600Z","cwd":"/tmp/real-workspace","originator":"Codex Desktop","cli_version":"0.117.0-alpha.24","source":"vscode","model_provider":"openai"}}
+{"timestamp":"2026-03-27T08:37:16.897Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-real-1","model_context_window":258400}}
+{"timestamp":"2026-03-27T08:37:16.897Z","type":"turn_context","payload":{"turn_id":"turn-real-1","cwd":"/tmp/real-workspace","current_date":"2026-03-27","timezone":"Asia/Shanghai"}}
+{"timestamp":"2026-03-27T08:37:16.898Z","type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"<environment_context>\n...</environment_context>"}]}}
+{"timestamp":"2026-03-27T08:37:16.899Z","type":"event_msg","payload":{"type":"user_message","message":"请帮我整理这个目录。"}}
+{"timestamp":"2026-03-27T08:37:16.900Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"请帮我整理这个目录。"}]}}
+{"timestamp":"2026-03-27T08:37:17.000Z","type":"event_msg","payload":{"type":"agent_message","message":"我先看一下目录结构。","phase":"commentary","memory_citation":null}}
+{"timestamp":"2026-03-27T08:37:17.001Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"我先看一下目录结构。"}],"phase":"commentary"}}
+{"timestamp":"2026-03-27T08:37:17.050Z","type":"response_item","payload":{"type":"custom_tool_call","status":"completed","call_id":"call_real_1","name":"apply_patch","input":"*** Begin Patch\n*** Add File: /tmp/example.txt\n+hello\n*** End Patch\n"}}
+{"timestamp":"2026-03-27T08:37:17.100Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call_real_1","output":"{\"output\":\"Success. Updated the following files:\\nA /tmp/example.txt\\n\",\"metadata\":{\"exit_code\":0,\"duration_seconds\":0.0}}"}}
+{"timestamp":"2026-03-27T08:37:17.200Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-real-1","last_agent_message":"我先看一下目录结构。"}}

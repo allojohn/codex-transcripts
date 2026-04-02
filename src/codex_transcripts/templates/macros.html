@@ -108,6 +108,41 @@
 </div>
 {% endmacro %}
 
+{% macro index_commit(commit_hash, commit_msg, timestamp, link) %}
+{% if link %}
+<div class="index-commit">
+  <a href="{{ link }}">
+    <div class="index-commit-header">
+      <span class="index-commit-hash">{{ commit_hash[:7] }}</span>
+      <time datetime="{{ timestamp }}" data-timestamp="{{ timestamp }}">{{ timestamp }}</time>
+    </div>
+    <div class="index-commit-msg">{{ commit_msg }}</div>
+  </a>
+</div>
+{% else %}
+<div class="index-commit">
+  <div class="index-commit-header">
+    <span class="index-commit-hash">{{ commit_hash[:7] }}</span>
+    <time datetime="{{ timestamp }}" data-timestamp="{{ timestamp }}">{{ timestamp }}</time>
+  </div>
+  <div class="index-commit-msg">{{ commit_msg }}</div>
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro index_long_text(rendered_content) %}
+<div class="index-item-long-text">
+  <div class="truncatable">
+    <div class="truncatable-content">
+      <div class="index-item-long-text-content">{{ rendered_content|safe }}</div>
+    </div>
+    <button class="expand-btn" type="button">Show more</button>
+  </div>
+</div>
+{% endmacro %}
+
 {% macro index_stats(tool_stats_str, long_texts_html) %}
-<span>{{ tool_stats_str }}</span>{{ long_texts_html|safe }}
+{% if tool_stats_str or long_texts_html %}
+{% if tool_stats_str %}<span>{{ tool_stats_str }}</span>{% endif %}{{ long_texts_html|safe }}
+{% endif %}
 {% endmacro %}

@@ -1,0 +1,7 @@
+{"type":"session_meta","timestamp":"2026-04-03T09:00:00.000Z","payload":{"id":"index-parity-1","cwd":"/tmp/index-parity","originator":"Codex Desktop","model_provider":"OpenAI","cli_version":"0.1.0"}}
+{"type":"event_msg","timestamp":"2026-04-03T09:00:01.000Z","payload":{"type":"task_started","turn_id":"turn-1"}}
+{"type":"response_item","timestamp":"2026-04-03T09:00:02.000Z","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Summarize the change and include commit output in the index."}]}}
+{"type":"response_item","timestamp":"2026-04-03T09:00:03.000Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"This assistant response is intentionally long so the index page can show a preview for assistant output. It should summarize the architecture, call out the file format changes, mention validation, and include follow-up steps for manual QA. This sentence is repeated to make the content long enough for truncation. This sentence is repeated to make the content long enough for truncation."}]}}
+{"type":"response_item","timestamp":"2026-04-03T09:00:04.000Z","payload":{"type":"function_call","name":"Bash","arguments":"git commit -m 'Add release notes'"}}
+{"type":"response_item","timestamp":"2026-04-03T09:00:05.000Z","payload":{"type":"function_call_output","output":"[main abc1234] Add release notes\n 1 file changed, 42 insertions(+)\n"}}
+{"type":"event_msg","timestamp":"2026-04-03T09:00:06.000Z","payload":{"type":"task_complete"}}

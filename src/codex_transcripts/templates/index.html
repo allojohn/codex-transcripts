@@ -4,8 +4,18 @@
 
 {% block content %}
 <div class="hero">
-  <h1>{{ transcript_title }}</h1>
-  <p>Codex Desktop transcript</p>
+  <div class="header-row">
+    <div>
+      <h1>{{ transcript_title }}</h1>
+      <p>Codex Desktop transcript</p>
+    </div>
+    <div id="search-box">
+      <input type="text" id="search-input" placeholder="Search..." aria-label="Search transcripts">
+      <button id="search-btn" type="button" aria-label="Search">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path></svg>
+      </button>
+    </div>
+  </div>
   {% if session_meta %}
   <div class="meta-grid">
     {% for item in session_meta %}
@@ -18,8 +28,24 @@
   {% endif %}
 </div>
 
-<p class="summary">{{ prompt_num }} turns · {{ total_messages }} entries · {{ total_tool_calls }} tool calls · {{ total_pages }} pages</p>
+<p class="summary">{{ prompt_num }} turns · {{ total_messages }} entries · {{ total_tool_calls }} tool calls · {{ total_commits }} commits · {{ total_pages }} pages</p>
 {{ pagination_html|safe }}
 {{ index_items_html|safe }}
 {{ pagination_html|safe }}
+
+<dialog id="search-modal">
+  <div class="search-modal-header">
+    <input type="text" id="modal-search-input" placeholder="Search..." aria-label="Search transcripts">
+    <button id="modal-search-btn" type="button" aria-label="Search">
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path></svg>
+    </button>
+    <button id="modal-close-btn" type="button" aria-label="Close">
+      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+    </button>
+  </div>
+  <div id="search-status"></div>
+  <div id="search-results"></div>
+</dialog>
+<script>window.__TRANSCRIPT_SEARCH_DATA__ = {{ search_data_json|safe }};</script>
+<script>{% include "search.js" %}</script>
 {% endblock %}

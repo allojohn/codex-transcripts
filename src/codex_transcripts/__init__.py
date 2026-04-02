@@ -1,4 +1,4 @@
-"""Convert Codex Desktop session JSONL files into browseable HTML transcripts."""
+"""Convert Codex Desktop session JSON and JSONL files into browseable HTML transcripts."""
 
 from __future__ import annotations
 
@@ -25,6 +25,8 @@ import markdown
 import questionary
 
 PROMPTS_PER_PAGE = 5
+LONG_TEXT_THRESHOLD = 300
+COMMIT_PATTERN = re.compile(r"\[[\w\-/]+ ([a-f0-9]{7,})\] (.+?)(?:\n|$)")
 
 _jinja_env = Environment(
     loader=PackageLoader("codex_transcripts", "templates"),
@@ -57,12 +59,22 @@ class TranscriptEntry:
 
 
 @dataclass
+class CommitEvent:
+    timestamp: str
+    commit_hash: str
+    commit_message: str
+    page_anchor: str = ""
+
+
+@dataclass
 class Turn:
     turn_id: str
     started_at: str
     entries: list[TranscriptEntry] = field(default_factory=list)
     prompt_preview: str = "(no prompt)"
     tool_calls: int = 0
+    long_texts: list[str] = field(default_factory=list)
+    commits: list[CommitEvent] = field(default_factory=list)
     status: str = "in_progress"
     completed_at: str | None = None
 
@@ -82,7 +94,7 @@ def format_json(obj: Any) -> str:
         formatted = json.dumps(obj, indent=2, ensure_ascii=False)
     except TypeError:
         formatted = str(obj)
-    return f"<pre class=\"json\">{formatted}</pre>"
+    return f"<pre class=\"json\">{escape(formatted)}</pre>"
 
 
 def make_msg_id(timestamp: str) -> str:
@@ -260,12 +272,75 @@ def render_function_call(payload: dict[str, Any]) -> tuple[str, str]:
     )
 
 
+def render_custom_tool_call(payload: dict[str, Any]) -> tuple[str, str]:
+    name = payload.get("name", "Custom Tool")
+    tool_input = payload.get("input", "")
+    return (
+        _macros.tool_use(name, "", tool_input or "{}", ""),
+        f"{name} {tool_input}".strip(),
+    )
+
+
 def render_function_call_output(payload: dict[str, Any]) -> tuple[str, str]:
     output = payload.get("output", "")
     return (
         _macros.tool_result(f"<pre>{escape(str(output))}</pre>", False, False),
         str(output),
     )
+
+
+def render_custom_tool_call_output(payload: dict[str, Any]) -> tuple[str, str]:
+    output = payload.get("output", "")
+    if isinstance(output, str):
+        try:
+            parsed = json.loads(output)
+        except json.JSONDecodeError:
+            parsed = output
+    else:
+        parsed = output
+
+    if isinstance(parsed, dict) and "output" in parsed:
+        text = str(parsed["output"])
+    else:
+        text = str(parsed)
+    return (
+        _macros.tool_result(f"<pre>{escape(text)}</pre>", False, False),
+        text,
+    )
+
+
+def extract_commit_events(text: str, timestamp: str) -> list[CommitEvent]:
+    if not text:
+        return []
+    if isinstance(text, str):
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            parsed = text
+    else:
+        parsed = text
+
+    if isinstance(parsed, dict) and "output" in parsed:
+        text = str(parsed["output"])
+    else:
+        text = str(parsed)
+
+    if "\n" not in text and any(token in text for token in ("\\r\\n", "\\n", "\\r")):
+        text = text.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\r", "\n")
+
+    commits: list[CommitEvent] = []
+    for line in text.splitlines():
+        match = COMMIT_PATTERN.match(line.strip())
+        if not match:
+            continue
+        commits.append(
+            CommitEvent(
+                timestamp=timestamp,
+                commit_hash=match.group(1),
+                commit_message=match.group(2).strip(),
+            )
+        )
+    return commits
 
 
 def render_reasoning(payload: dict[str, Any]) -> tuple[str, str]:
@@ -279,111 +354,150 @@ def render_reasoning(payload: dict[str, Any]) -> tuple[str, str]:
     return _macros.thinking(render_markdown_text(text)), text
 
 
+def load_session_items(filepath: Path) -> list[dict[str, Any]]:
+    if filepath.suffix == ".jsonl":
+        items: list[dict[str, Any]] = []
+        with filepath.open("r", encoding="utf-8") as handle:
+            for raw_line in handle:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    item = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(item, dict):
+                    items.append(item)
+        return items
+
+    with filepath.open("r", encoding="utf-8") as handle:
+        data = json.load(handle)
+
+    if isinstance(data, list):
+        return [item for item in data if isinstance(item, dict)]
+    if isinstance(data, dict):
+        for key in ("items", "events", "entries", "loglines"):
+            value = data.get(key)
+            if isinstance(value, list):
+                return [item for item in value if isinstance(item, dict)]
+        if "type" in data:
+            return [data]
+    return []
+
+
 def parse_session_file(filepath: Path) -> tuple[dict[str, Any], list[Turn]]:
     meta: dict[str, Any] = {}
     turns: list[Turn] = []
     current_turn: Turn | None = None
 
-    with filepath.open("r", encoding="utf-8") as handle:
-        for raw_line in handle:
-            line = raw_line.strip()
-            if not line:
-                continue
-            try:
-                item = json.loads(line)
-            except json.JSONDecodeError:
-                continue
+    for item in load_session_items(filepath):
+        item_type = item.get("type")
+        timestamp = item.get("timestamp", "")
+        payload = item.get("payload", {})
 
-            item_type = item.get("type")
-            timestamp = item.get("timestamp", "")
-            payload = item.get("payload", {})
+        if item_type == "session_meta":
+            meta = payload
+            continue
 
-            if item_type == "session_meta":
-                meta = payload
-                continue
+        if item_type == "event_msg" and payload.get("type") == "task_started":
+            if current_turn and current_turn.entries:
+                turns.append(current_turn)
+            current_turn = Turn(
+                turn_id=payload.get("turn_id", f"turn-{len(turns) + 1}"),
+                started_at=timestamp,
+            )
+            continue
 
-            if item_type == "event_msg" and payload.get("type") == "task_started":
-                if current_turn and current_turn.entries:
-                    turns.append(current_turn)
-                current_turn = Turn(
-                    turn_id=payload.get("turn_id", f"turn-{len(turns) + 1}"),
-                    started_at=timestamp,
+        if current_turn is None:
+            current_turn = Turn(turn_id="bootstrap", started_at=timestamp)
+
+        if item_type == "response_item":
+            payload_type = payload.get("type")
+            if payload_type == "message":
+                if should_skip_message(payload):
+                    continue
+                role_class, role_label, content_html, index_text = render_response_message(payload)
+                if role_class == "assistant" and payload.get("phase") == "commentary":
+                    role_class = "commentary"
+                    role_label = "Commentary"
+                current_turn.entries.append(
+                    TranscriptEntry(
+                        timestamp=timestamp,
+                        role_class=role_class,
+                        role_label=role_label,
+                        content_html=content_html,
+                        index_text=index_text,
+                    )
                 )
+                if role_class == "user" and current_turn.prompt_preview == "(no prompt)" and index_text.strip():
+                    current_turn.prompt_preview = first_line(index_text)
+                if role_class == "assistant":
+                    cleaned_text = index_text.strip()
+                    if len(cleaned_text) >= LONG_TEXT_THRESHOLD:
+                        current_turn.long_texts.append(cleaned_text)
+            elif payload_type == "function_call":
+                current_turn.tool_calls += 1
+                content_html, index_text = render_function_call(payload)
+                current_turn.entries.append(
+                    TranscriptEntry(timestamp, "tool", "Tool Call", content_html, index_text)
+                )
+            elif payload_type == "function_call_output":
+                content_html, index_text = render_function_call_output(payload)
+                current_turn.entries.append(
+                    TranscriptEntry(timestamp, "tool-reply", "Tool Result", content_html, index_text)
+                )
+                current_turn.commits.extend(extract_commit_events(index_text, timestamp))
+            elif payload_type == "custom_tool_call":
+                current_turn.tool_calls += 1
+                content_html, index_text = render_custom_tool_call(payload)
+                current_turn.entries.append(
+                    TranscriptEntry(timestamp, "tool", "Tool Call", content_html, index_text)
+                )
+            elif payload_type == "custom_tool_call_output":
+                content_html, index_text = render_custom_tool_call_output(payload)
+                current_turn.entries.append(
+                    TranscriptEntry(timestamp, "tool-reply", "Tool Result", content_html, index_text)
+                )
+                current_turn.commits.extend(extract_commit_events(index_text, timestamp))
+            elif payload_type == "reasoning":
+                content_html, index_text = render_reasoning(payload)
+                current_turn.entries.append(
+                    TranscriptEntry(timestamp, "thinking", "Reasoning", content_html, index_text)
+                )
+            continue
+
+        if item_type == "event_msg":
+            payload_type = payload.get("type")
+            if payload_type in {"agent_message", "user_message", "token_count"}:
                 continue
-
-            if current_turn is None:
-                current_turn = Turn(turn_id="bootstrap", started_at=timestamp)
-
-            if item_type == "response_item":
-                payload_type = payload.get("type")
-                if payload_type == "message":
-                    if should_skip_message(payload):
-                        continue
-                    role_class, role_label, content_html, index_text = render_response_message(payload)
-                    if role_class == "assistant" and payload.get("phase") == "commentary":
-                        role_class = "commentary"
-                        role_label = "Commentary"
-                    current_turn.entries.append(
-                        TranscriptEntry(
-                            timestamp=timestamp,
-                            role_class=role_class,
-                            role_label=role_label,
-                            content_html=content_html,
-                            index_text=index_text,
-                        )
-                    )
-                    if role_class == "user" and current_turn.prompt_preview == "(no prompt)" and index_text.strip():
-                        current_turn.prompt_preview = first_line(index_text)
-                elif payload_type == "function_call":
-                    current_turn.tool_calls += 1
-                    content_html, index_text = render_function_call(payload)
-                    current_turn.entries.append(
-                        TranscriptEntry(timestamp, "tool", "Tool Call", content_html, index_text)
-                    )
-                elif payload_type == "function_call_output":
-                    content_html, index_text = render_function_call_output(payload)
-                    current_turn.entries.append(
-                        TranscriptEntry(timestamp, "tool-reply", "Tool Result", content_html, index_text)
-                    )
-                elif payload_type == "reasoning":
-                    content_html, index_text = render_reasoning(payload)
-                    current_turn.entries.append(
-                        TranscriptEntry(timestamp, "thinking", "Reasoning", content_html, index_text)
-                    )
+            if payload_type == "task_complete":
+                current_turn.status = "completed"
+                current_turn.completed_at = timestamp
                 continue
-
-            if item_type == "event_msg":
-                payload_type = payload.get("type")
-                if payload_type in {"agent_message", "user_message", "token_count"}:
-                    continue
-                if payload_type == "task_complete":
-                    current_turn.status = "completed"
-                    current_turn.completed_at = timestamp
-                    continue
-                if payload_type == "turn_aborted":
-                    current_turn.status = "aborted"
-                    current_turn.completed_at = timestamp
-                    current_turn.entries.append(
-                        TranscriptEntry(
-                            timestamp=timestamp,
-                            role_class="system",
-                            role_label="Turn Aborted",
-                            content_html=_macros.meta_block("<p>This turn was interrupted before completion.</p>"),
-                            index_text="turn aborted",
-                        )
-                    )
-                    continue
-                if payload_type == "task_started":
-                    continue
+            if payload_type == "turn_aborted":
+                current_turn.status = "aborted"
+                current_turn.completed_at = timestamp
                 current_turn.entries.append(
                     TranscriptEntry(
                         timestamp=timestamp,
                         role_class="system",
-                        role_label=payload_type.replace("_", " ").title(),
-                        content_html=_macros.meta_block(format_json(payload)),
-                        index_text=payload_type,
+                        role_label="Turn Aborted",
+                        content_html=_macros.meta_block("<p>This turn was interrupted before completion.</p>"),
+                        index_text="turn aborted",
                     )
                 )
+                continue
+            if payload_type == "task_started":
+                continue
+            current_turn.entries.append(
+                TranscriptEntry(
+                    timestamp=timestamp,
+                    role_class="system",
+                    role_label=payload_type.replace("_", " ").title(),
+                    content_html=_macros.meta_block(format_json(payload)),
+                    index_text=payload_type,
+                )
+            )
 
     if current_turn and current_turn.entries:
         turns.append(current_turn)
@@ -438,6 +552,79 @@ def build_index_pagination(total_pages: int) -> str:
     return _macros.index_pagination(total_pages)
 
 
+def build_index_items(turns: list[Turn]) -> list[str]:
+    timeline: list[tuple[float, int, str]] = []
+    for idx, turn in enumerate(turns, start=1):
+        page_num = math.ceil(idx / PROMPTS_PER_PAGE)
+        first_entry_timestamp = turn.entries[0].timestamp if turn.entries else turn.started_at
+        long_texts_html = "".join(
+            _macros.index_long_text(render_markdown_text(text)) for text in turn.long_texts
+        )
+        stats_html = _macros.index_stats(
+            f"{turn.tool_calls} tool calls · {turn.status}",
+            long_texts_html,
+        )
+        timeline.append(
+            (
+                _timestamp_sort_key(turn.started_at, idx),
+                0,
+                _macros.index_item(
+                    idx,
+                    f"page-{page_num:03d}.html#{make_msg_id(first_entry_timestamp)}",
+                    turn.started_at,
+                    render_markdown_text(turn.prompt_preview),
+                    stats_html,
+                ),
+            )
+        )
+        for commit_offset, commit in enumerate(turn.commits):
+            timeline.append(
+                (
+                    _timestamp_sort_key(commit.timestamp, idx + (commit_offset / 1000.0)),
+                    1,
+                    _macros.index_commit(
+                        commit.commit_hash,
+                        commit.commit_message,
+                        commit.timestamp,
+                        commit.page_anchor or f"page-{page_num:03d}.html#turn-{idx}",
+                    ),
+                )
+            )
+    timeline.sort(key=lambda item: (item[0], item[1]))
+    return [item_html for _, _, item_html in timeline]
+
+
+def build_search_data(turns: list[Turn]) -> list[dict[str, str]]:
+    search_data: list[dict[str, str]] = []
+    for idx, turn in enumerate(turns, start=1):
+        page_num = math.ceil(idx / PROMPTS_PER_PAGE)
+        page_file = f"page-{page_num:03d}.html"
+        for entry in turn.entries:
+            search_text = entry.index_text.strip()
+            if not search_text:
+                continue
+            msg_id = make_msg_id(entry.timestamp)
+            search_data.append(
+                {
+                    "page": page_file,
+                    "anchor": msg_id,
+                    "role": entry.role_label,
+                    "timestamp": entry.timestamp,
+                    "text": search_text,
+                }
+            )
+    return search_data
+
+
+def serialize_search_data(turns: list[Turn]) -> str:
+    return (
+        json.dumps(build_search_data(turns), ensure_ascii=False)
+        .replace("&", "\\u0026")
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+    )
+
+
 def generate_html(input_path: Path, output_dir: Path) -> dict[str, Any]:
     meta, turns = parse_session_file(input_path)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -445,24 +632,7 @@ def generate_html(input_path: Path, output_dir: Path) -> dict[str, Any]:
     template_page = get_template("page.html")
 
     total_pages = max(1, math.ceil(len(turns) / PROMPTS_PER_PAGE))
-    index_items = []
-
-    for idx, turn in enumerate(turns, start=1):
-        page_num = math.ceil(idx / PROMPTS_PER_PAGE)
-        page_link = f"page-{page_num:03d}.html#{make_msg_id(turn.entries[0].timestamp)}"
-        stats_html = _macros.index_stats(
-            f"{turn.tool_calls} tool calls · {turn.status}",
-            "",
-        )
-        index_items.append(
-            _macros.index_item(
-                idx,
-                page_link,
-                turn.started_at,
-                render_markdown_text(turn.prompt_preview),
-                stats_html,
-            )
-        )
+    index_items = build_index_items(turns)
 
     all_messages_html = "".join(
         _macros.turn_section(
@@ -482,10 +652,12 @@ def generate_html(input_path: Path, output_dir: Path) -> dict[str, Any]:
         prompt_num=len(turns),
         total_messages=sum(len(turn.entries) for turn in turns),
         total_tool_calls=sum(turn.tool_calls for turn in turns),
+        total_commits=sum(len(turn.commits) for turn in turns),
         total_pages=total_pages,
         pagination_html=build_index_pagination(total_pages),
         index_items_html="".join(index_items),
         all_messages_html=all_messages_html,
+        search_data_json=serialize_search_data(turns),
     )
     (output_dir / "index.html").write_text(index_html, encoding="utf-8")
 
@@ -552,39 +724,67 @@ def generate_batch_html(
             "total_projects": len(projects),
             "total_sessions": total_sessions,
             "output_dir": output_dir,
+            "failed_sessions": [],
         }
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    successful_projects: list[dict[str, Any]] = []
+    failed_sessions: list[dict[str, str]] = []
+    successful_sessions = 0
 
     for project in projects:
         project_dir = output_dir / project["name"]
         project_dir.mkdir(parents=True, exist_ok=True)
+        successful_project_sessions: list[SessionInfo] = []
         for session in project["sessions"]:
             session_dir = project_dir / session.path.stem
-            generate_html(session.path, session_dir)
+            try:
+                generate_html(session.path, session_dir)
+            except Exception as exc:
+                failed_sessions.append(
+                    {
+                        "project": project["name"],
+                        "session": session.path.stem,
+                        "error": str(exc),
+                    }
+                )
+                continue
+            successful_project_sessions.append(session)
+            successful_sessions += 1
+
+        if not successful_project_sessions:
+            continue
+
+        successful_projects.append(
+            {
+                "name": project["name"],
+                "sessions": successful_project_sessions,
+            }
+        )
 
         project_html = get_template("project_index.html").render(
             css=CSS,
             js=JS,
             project_name=project["name"],
-            sessions=project["sessions"],
-            session_count=len(project["sessions"]),
+            sessions=successful_project_sessions,
+            session_count=len(successful_project_sessions),
         )
         (project_dir / "index.html").write_text(project_html, encoding="utf-8")
 
     archive_html = get_template("master_index.html").render(
         css=CSS,
         js=JS,
-        projects=projects,
-        total_projects=len(projects),
-        total_sessions=total_sessions,
+        projects=successful_projects,
+        total_projects=len(successful_projects),
+        total_sessions=successful_sessions,
     )
     (output_dir / "index.html").write_text(archive_html, encoding="utf-8")
     return {
-        "projects": projects,
-        "total_projects": len(projects),
-        "total_sessions": total_sessions,
+        "projects": successful_projects,
+        "total_projects": len(successful_projects),
+        "total_sessions": successful_sessions,
         "output_dir": output_dir,
+        "failed_sessions": failed_sessions,
     }
 
 
@@ -889,6 +1089,10 @@ def all(
         click.echo(
             f"Archived {result['total_sessions']} sessions across {result['total_projects']} workspaces to {index_path}"
         )
+        if result["failed_sessions"]:
+            click.echo(f"Skipped {len(result['failed_sessions'])} failed sessions:")
+            for failed in result["failed_sessions"]:
+                click.echo(f"- {failed['project']}/{failed['session']}: {failed['error']}")
     if should_open:
         webbrowser.open(index_path.resolve().as_uri())
 
@@ -949,6 +1153,16 @@ body {
 .hero p {
   margin: 0;
   color: var(--text-muted);
+}
+.header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.header-row h1 {
+  margin-bottom: 8px;
 }
 .meta-grid {
   display: grid;
@@ -1119,6 +1333,60 @@ code {
   font-size: 0.92rem;
   border-top: 1px solid rgba(0,0,0,0.08);
 }
+.index-item-stats > span {
+  display: inline-block;
+}
+.index-item-long-text {
+  margin-top: 10px;
+  padding: 12px;
+  background: var(--card-bg);
+  border-radius: 10px;
+  border-left: 3px solid var(--assistant-border);
+}
+.index-item-long-text-content {
+  color: var(--text-color);
+}
+.index-item-long-text .truncatable.truncated::after {
+  background: linear-gradient(to bottom, transparent, var(--card-bg));
+}
+.index-commit {
+  margin-bottom: 12px;
+  padding: 10px 16px;
+  background: #fff3e0;
+  border-left: 4px solid #ff9800;
+  border-radius: 10px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+.index-commit a {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+}
+.index-commit a:hover {
+  background: rgba(255, 152, 0, 0.1);
+  margin: -10px -16px;
+  padding: 10px 16px;
+  border-radius: 10px;
+}
+.index-commit-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  font-size: 0.85rem;
+  margin-bottom: 4px;
+}
+.index-commit-hash {
+  font-family: "SFMono-Regular", Menlo, Monaco, monospace;
+  color: #e65100;
+  font-weight: 600;
+}
+.index-commit-msg {
+  color: #5d4037;
+}
+.index-commit time {
+  color: var(--text-muted);
+}
 .timestamp-link {
   color: inherit;
   text-decoration: none;
@@ -1178,10 +1446,119 @@ code {
 .truncatable.expanded .expand-btn {
   display: block;
 }
+#search-box {
+  display: none;
+  align-items: center;
+  gap: 8px;
+}
+#search-box input,
+.search-modal-header input {
+  padding: 8px 12px;
+  border: 1px solid rgba(0,0,0,0.14);
+  border-radius: 8px;
+  font-size: 16px;
+  background: var(--card-bg);
+}
+#search-box input {
+  min-width: 180px;
+}
+#search-box button,
+#modal-search-btn,
+#modal-close-btn {
+  background: var(--user-border);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#search-box button:hover,
+#modal-search-btn:hover {
+  background: #1565c0;
+}
+#modal-close-btn {
+  background: var(--text-muted);
+  margin-left: 8px;
+}
+#modal-close-btn:hover {
+  background: #616161;
+}
+#search-modal[open] {
+  border: none;
+  border-radius: 14px;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.2);
+  padding: 0;
+  width: min(92vw, 900px);
+  height: min(82vh, 720px);
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+}
+#search-modal::backdrop {
+  background: rgba(0,0,0,0.5);
+}
+.search-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px;
+  border-bottom: 1px solid rgba(0,0,0,0.08);
+  background: var(--bg-color);
+  border-radius: 14px 14px 0 0;
+}
+.search-modal-header input {
+  flex: 1;
+}
+#search-status {
+  padding: 8px 16px;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+}
+#search-results {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+.search-result {
+  margin-bottom: 16px;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+.search-result a {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+}
+.search-result a:hover {
+  background: rgba(25, 118, 210, 0.05);
+}
+.search-result-page {
+  padding: 6px 12px;
+  background: rgba(0,0,0,0.03);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+}
+.search-result-content {
+  padding: 12px;
+}
+.search-result mark {
+  background: #fff59d;
+  padding: 1px 2px;
+  border-radius: 2px;
+}
 @media (max-width: 640px) {
   .container { padding: 16px 10px 32px; }
   .hero { padding: 18px; border-radius: 12px; }
   .turn-head { display: block; }
+  .header-row { align-items: flex-start; }
+  #search-box input { min-width: 120px; }
+  #search-modal[open] { width: 95vw; height: 90vh; max-height: 90vh; }
 }
 """
 
