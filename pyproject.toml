@@ -1,6 +1,6 @@
 [project]
 name = "codex-export"
-version = "0.1.1"
+version = "0.1.2"
 description = "Export Codex Desktop session files as shareable HTML pages"
 readme = "README.md"
 license = "Apache-2.0"

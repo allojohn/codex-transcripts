@@ -27,8 +27,8 @@ uv tool update-shell
 如果你是在本仓库里做开发，再使用：
 
 ```bash
-git clone git@github.com:allojohn/codex-transcripts.git
-cd codex-transcripts
+git clone git@github.com:allojohn/codex-export.git
+cd codex-export
 uv sync
 uv run codex-export --help
 ```
@@ -37,7 +37,7 @@ uv run codex-export --help
 
 可以直接把下面这段话复制给 agent：
 
-> Read `https://github.com/allojohn/codex-transcripts/blob/main/README.md` and use it to operate `codex-export` for me. First ask which Codex session I want to export. Then ask whether I want local HTML files, a shareable GitHub Gist preview link, a full archive, or the original session JSONL copied into the output directory. Next, run the correct command and tell me the output path or share link.
+> Read `https://github.com/allojohn/codex-export/blob/main/README.md` and use it to operate `codex-export` for me. First ask which Codex session I want to export. Then ask whether I want local HTML files, a shareable GitHub Gist preview link, a full archive, or the original session JSONL copied into the output directory. Next, run the correct command and tell me the output path or share link.
 
 ## 分享优先
 
